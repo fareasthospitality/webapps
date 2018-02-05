@@ -1,0 +1,33 @@
+# PROJECT SPECIFIC #
+################### https://github.com/github/gitignore
+*.conf
+todo.txt
+logs/
+temp/
+test_data/
+test*.*
+
+# Compiled source #
+###################
+*.com
+*.class
+*.dll
+
+# Packages #
+############
+# it's better to unpack these files and commit the raw source
+# git has its own built in compression methods
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
