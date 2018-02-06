@@ -271,22 +271,6 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
 
         self.df_out = df_out
 
-    def send_email_weekly(self, df=None, str_subject='Notification', l_emails=None, str_html=None, fn=None):
-        """
-        Sends out a HTML email through Mailgun's free API. Note monthly send limits (10000) accordingly. Can send only to authorized recipients.
-        """
-        str_domain = 'sandbox6f540d3fdf5342028255b663240b8811.mailgun.org'
-        return requests.post(
-            "https://api.mailgun.net/v3/{}/messages".format(str_domain),
-            auth=("api", 'key-85c715dea79bd4780b97db3b73cc73a8'),  # Mailgun: amos@amosang.com account.
-            files=[('attachment', open(fn, 'rb'))],  # files=[] works as well.
-            data={'from': "FEH Auto-Notification Robot <noreply@fareast.com.sg>",
-                  'to': l_emails,
-                  'subject': str_subject,
-                  'text': 'HTML email contents not displayed. Please enable HTML viewing for your email client.',
-                  'html': str_html
-                  })
-
     def build_body(self, str_template_file, di_params=None):
         templateLoader = jinja2.FileSystemLoader(searchpath=self.config['global']['global_templates'])
         templateEnv = jinja2.Environment(loader=templateLoader)
