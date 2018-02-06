@@ -1,4 +1,7 @@
+import os
+import re
 import sys
+import datetime as dt
 import time
 import logging
 
@@ -35,3 +38,50 @@ def dec_err_handler(retries=0):
         wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
         return wrapped_err_handler
     return wrap
+
+
+def get_latest_file(str_folder=None, pattern=None):
+    """
+    Given a folder, return the last updated file in that folder.
+    If pattern (regex) is given, apply pattern as a filter first.
+    """
+    _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
+
+    # Apply pattern to filter l_files if pattern exists #
+    if pattern is not None:
+        l_files = [f for f in l_files if re.search(pattern, f)]
+        if len(l_files) == 0: raise Exception('No files found that match the given pattern.')
+
+    # Get last modified file, from the filtered list #
+    dt_prev = None  # Initialize outside the loop.
+    for file in l_files:
+        str_fn_curr = os.path.join(str_folder, file)
+        dt_curr = dt.datetime.fromtimestamp(os.path.getmtime(str_fn_curr))
+
+        if dt_prev is None:
+            dt_prev = dt_curr
+            str_fn_prev = str_fn_curr
+        else:
+            if dt_curr > dt_prev:  # Keep the most recent datetime value.
+                dt_prev = dt_curr
+                str_fn_prev = str_fn_curr
+    return (str_fn_prev, file)
+
+
+def get_files(str_folder=None, pattern=None, latest_only=False):
+    """ Given a directory name, return all full filenames that exist there, and which match the pattern. Can search for latest filename only.
+    :param str_folder: Directory to search for files.
+    :param pattern: A regex expression, to filter the list of files.
+    :param latest_only: True, if you want to get the latest filename only.
+    :return: Returns a tuple of (<full filename>, <filename>) if latest_only=True. Otherwise, returns a list of tuples of (<full filename>, <filename>).
+    """
+    _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
+
+    # Simple case. Retrieve all files that match the pattern.
+    if (str_folder is not None) & ~latest_only:
+        if pattern is None:  # Return all files in the directory
+            return l_files
+        else:  # Return only files which match pattern.
+            return [(os.path.join(str_folder, fn), fn) for fn in l_files if re.search(pattern, fn)]
+    else:
+        return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return a 2-values tuple!

@@ -156,7 +156,7 @@ class ListManager(object):
                     AND email = '{str_email}'
                     """
                     pd.io.sql.execute(str_sql, self.db_conn)
-                    str_msg = f'{str_email} has been subscribed to mailing list {str_listname}'
+                    str_msg = f'{str_email} subscription to mailing list {str_listname} has been updated.'
                     self.logger.info(str_msg)
                 else:
                     df = DataFrame(
