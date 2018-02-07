@@ -16,7 +16,7 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email import encoders
 
-from utils import get_files
+from utils import dec_err_handler
 
 
 class ReportBot(object):
@@ -195,19 +195,19 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
 
         return df_in
 
-    def get(self):
+    @dec_err_handler(retries=0)
+    def get(self, str_dt_from, str_dt_to):
         # Specify Period. By default, program will take last 7 day period (up to the day before).
         # str_dt_from = '2017-12-01'  # DEBUG <= Change this value!
         # str_dt_to = '2017-12-31'
-        str_dt_from = dt.datetime.strftime((dt.datetime.today() - pd.Timedelta('7D')),
-                                           format='%Y-%m-%d')  # Round-about conversion, because the string values are later used in email output.
-        str_dt_to = dt.datetime.strftime((dt.datetime.today() - pd.Timedelta('1D')), format='%Y-%m-%d')
+
         # Make these accessible to all methods.
         self.str_dt_from = str_dt_from
         self.str_dt_to = str_dt_to
 
         # Get data from text files.
         df_op = self.get_df_from_all_opera_files(dt_from=pd.to_datetime(str_dt_from), dt_to=pd.to_datetime(str_dt_to))
+        self.df_op = df_op  # Work-around. Solely for use with send_op_repeat_guest_monitor().
 
         # Create XLSX file to send as email attachment; delete file immediately after sending.
         str_fn = 'email_list - {} to {}.xlsx'.format(str_dt_from, str_dt_to)
@@ -230,10 +230,12 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         i_invalid = sum(~df['email_is_valid_tech']) - sum(df['email_is_blank']) + i_bookingdotcom
 
         # Valid = TechnicallyValid - Booking.com
-        str_portfolio_level_stats = """<b>[PORTFOLIO LEVEL STATISTICS]</b>
-        Not Collected: {}%
-        Invalid: {}%
-        Valid: {}%        
+        str_portfolio_level_stats = """ Here is the email collection information from Opera:
+                
+        <b>[PORTFOLIO LEVEL STATISTICS]</b>
+        Not Collected: {}% 
+        Invalid: {}% 
+        Valid: {}% 
         """.format(round( (sum(df['email_is_blank']) / i_size) * 100, 1),
                   round( i_invalid / i_size * 100, 1),
                   round( (sum(df['email_is_valid_tech']) - i_bookingdotcom) / i_size * 100, 1)
@@ -277,12 +279,11 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         template = templateEnv.get_template(str_template_file)
         return template.render(di_params)  # Return email body, generated with template.
 
-    def send(self):
+    @dec_err_handler(retries=0)
+    def send(self, str_listname=None, str_subject=None):
         df = self.df_out.drop(labels=['month_year'], axis=1, inplace=False)  # Drop unnecessary column.
         str_portfolio_level_stats = self.str_portfolio_level_stats.replace('\n', '<br />')  # Prep Python string for HTML.
-
-        str_subject = '[opera_email_quality_monitor] Arrival Date Period: {} to {}'.format(self.str_dt_from, self.str_dt_to)
-
+        #str_subject = '[opera_email_quality_monitor] Arrival Date Period: {} to {}'.format(self.str_dt_from, self.str_dt_to)
         str_df = df.to_html(index=False, na_rep='', justify='left')
         di_params = {'str_msg': str_portfolio_level_stats,  # Handcrafted msg.
                      'str_df': str_df,
@@ -296,11 +297,11 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         SELECT email FROM mail_list
         WHERE listname = '{}'
         AND subscribed = 1
-        """.format('test')  # listname here
+        """.format(str_listname)  # listname here
         df = pd.read_sql(str_sql, self.db_listman_conn)
         l_email_recipients = df['email'].tolist()
 
-        # SEND EMAL #
+        # SEND EMAIL #
         MAIL_SERVER = self.SMTP['mail_server']
         SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
 
@@ -316,12 +317,75 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         part.add_header('Content-Disposition', 'attachment; filename="{}"'.format(self.str_fn))
         msg.attach(part)
 
-        # Send the message via our SMTP server
+        # Send the message via our SMTP server #
         s = smtplib.SMTP(host=MAIL_SERVER)
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
-
-        # # Send!
-        # self.send_email_weekly(df=df, str_subject=str_subject, l_emails=l_email_recipients, str_html=str_html,
-        #                   fn=self.str_email_attach_fn)
         os.remove(self.str_email_attach_fn)  # Delete the Excel file.
+
+        # Write to log file #
+        self.logger.info('Sent email with subject "{}"'.format(str_subject))
+
+    @dec_err_handler(retries=0)
+    def send_op_repeat_guest_monitor(self, str_listname=None, str_subject=None):
+        """ This method is a hack, to handle the "op_repeat_guest_monitor" report, which is only slightly different
+        from the opera_email_quality_monitor reports. This method uses self.df_op, populated in get(), and takes it from there.
+        :param str_listname:
+        :param str_subject:
+        :return: NA
+        """
+        df_op = self.df_op
+        # Calculate percentage
+        i_repeat_guests = len(df_op[df_op['vip_code'] == 'Repeat Guests'])
+        i_total_guests = len(df_op)
+        str_percent = str(round(i_repeat_guests / i_total_guests * 100, 2))
+        # Calculate date range of arrival_date for data set used. For user to get a feel of whether the data set used was correct or not.
+        str_arr_dt_min = dt.datetime.strftime(df_op['arrival_date_dt'].min(), format='%Y-%m-%d')
+        str_arr_dt_max = dt.datetime.strftime(df_op['arrival_date_dt'].max(), format='%Y-%m-%d')
+
+        # Craft the email message #
+        str_msg = """
+        <p> Here is your information on repeat guests, based on Opera bookings. 
+        Recall that a repeat guest is defined as one which has the VIP Code 
+        ("VIP 8" in Opera; Description: "Repeat Guests").
+        This measurement is done as a management metric to measure for the direct booking initiative a.k.a. 
+        Insiders' Programme for 2018.
+        </p>
+        <b> Percentage of repeat guests: {}% </b> <br />
+        <b> Arrival Date Range in Source Data Set: {} </b>
+        """.format(str_percent, str_arr_dt_min + ' to ' + str_arr_dt_max)
+
+        di_params = {'str_msg': str_msg,  # Handcrafted msg.
+                     'str_df': '',
+                     'str_msg2': '',
+                     'year': dt.datetime.now().year
+                     }
+        str_html = self.build_body(str_template_file='jinja_basic_frame.html', di_params=di_params)
+
+        # Determine email recipients #
+        str_sql = """
+        SELECT email FROM mail_list
+        WHERE listname = '{}'
+        AND subscribed = 1
+        """.format(str_listname)  # listname here
+        df = pd.read_sql(str_sql, self.db_listman_conn)
+        l_email_recipients = df['email'].tolist()
+
+        # SEND EMAIL #
+        MAIL_SERVER = self.SMTP['mail_server']
+        SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER
+        msg['To'] = ','.join(l_email_recipients)
+        msg['Subject'] = str_subject
+        msg.attach(MIMEText(str_html, 'html'))
+
+        # Send the message via our SMTP server #
+        s = smtplib.SMTP(host=MAIL_SERVER)
+        s.sendmail(SENDER, l_email_recipients, msg.as_string())
+        s.quit()
+        os.remove(self.str_email_attach_fn)  # Delete the Excel file.
+
+        # Write to log file #
+        self.logger.info('Sent email with subject "{}"'.format(str_subject))
