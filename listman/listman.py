@@ -34,7 +34,7 @@ class ListManager(object):
         str_userid = self.config['database']['userid']
         str_password = self.config['database']['password']
         str_schema = self.config['database']['schema']
-        str_conn_mysql = f'mysql+pymysql://{str_userid}:{str_password}@{str_host}/{str_schema}?charset=utf8'
+        str_conn_mysql = f'mysql+pymysql://{str_userid}:{str_password}@{str_host}/{str_schema}?charset=utf8mb4'
         engine = sqlalchemy.create_engine(str_conn_mysql, echo=False)
         self.db_conn = engine.connect()
 
