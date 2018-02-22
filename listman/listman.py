@@ -1,20 +1,12 @@
 import datetime as dt
-import time
-import functools
 import pandas as pd
 from pandas import DataFrame, Series
 import os
 import sys
 import re
-import io
 import logging
-import shutil
-import requests
 import sqlalchemy
 from configobj import ConfigObj
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import html
 from flask import Flask, request
 

@@ -3,11 +3,8 @@ import jinja2
 import pandas as pd
 from pandas import DataFrame, Series
 import os
-import sys
 import re
 import logging
-import shutil
-import requests
 import sqlalchemy
 from configobj import ConfigObj
 import smtplib
@@ -100,6 +97,77 @@ class ReportBot(object):
             handler.close()
             self.logger.removeHandler(handler)
 
+    def build_body(self, str_template_file, di_params=None):
+        templateLoader = jinja2.FileSystemLoader(searchpath=self.config['global']['global_templates'])
+        templateEnv = jinja2.Environment(loader=templateLoader)
+        template = templateEnv.get_template(str_template_file)
+        return template.render(di_params)  # Return email body, generated with template.
+
+    def check_valid_email(self, str_email):
+        '''Checks whether a given string has the format of a valid email.
+        Returns True if valid, else returns False.
+        '''
+        emailRegex = '[^@]+@[^@]+\.[^@]+'
+        return True if re.match(emailRegex, str_email) else False
+
+
+class AdminReportBot(ReportBot):
+    def __init__(self):
+        super().__init__()
+        # INIT LOGGER #
+        self._init_logger(logger_name='admin_report_bot')
+
+    def __del__(self):
+        super().__del__()
+
+    @dec_err_handler(retries=0)
+    def send(self, str_listname=None, str_subject=None, **kwargs):
+        str_msg = kwargs['str_msg']
+        str_msg2 = kwargs['str_msg2']
+        df = kwargs['df']
+
+        str_df = df.to_html(index=False, na_rep='', justify='left')
+        di_params = {'str_msg': str_msg,
+                     'str_df': str_df,
+                     'str_msg2': str_msg2,
+                     'year': dt.datetime.now().year
+                     }
+        str_html = self.build_body(str_template_file='jinja_basic_frame.html', di_params=di_params)
+
+        # Determine email recipients #
+        str_sql = """
+        SELECT email FROM mail_list
+        WHERE listname = '{}'
+        AND subscribed = 1
+        """.format(str_listname)  # listname here
+        df = pd.read_sql(str_sql, self.db_listman_conn)
+        l_email_recipients = df['email'].tolist()
+
+        # SEND EMAIL #
+        MAIL_SERVER = self.SMTP['mail_server']
+        SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER
+        msg['To'] = ','.join(l_email_recipients)
+        msg['Subject'] = str_subject
+        msg.attach(MIMEText(str_html, 'html'))
+
+        # part = MIMEBase('application', "octet-stream")
+        # part.set_payload(open(self.str_email_attach_fn, 'rb').read())
+        # encoders.encode_base64(part)
+        # part.add_header('Content-Disposition', 'attachment; filename="{}"'.format(self.str_fn))
+        # msg.attach(part)
+
+        # Send the message via our SMTP server #
+        s = smtplib.SMTP(host=MAIL_SERVER)
+        s.sendmail(SENDER, l_email_recipients, msg.as_string())
+        s.quit()
+        # os.remove(self.str_email_attach_fn)  # Delete the Excel file.
+
+        # Write to log file #
+        self.logger.info('Sent email with subject "{}"'.format(str_subject))
+
 
 class OperaEmailQualityMonitorReportBot(ReportBot):
     # Get labels for Opera columns.
@@ -119,13 +187,6 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
 
     def __del__(self):
         super().__del__()
-
-    def check_valid_email(self, str_email):
-        '''Checks whether a given string has the format of a valid email.
-        Returns True if valid, else returns False.
-        '''
-        emailRegex = '[^@]+@[^@]+\.[^@]+'
-        return True if re.match(emailRegex, str_email) else False
 
     def get_df_from_opera_file(self, fn=None, dt_from=None, dt_to=None):
         """
@@ -272,12 +333,6 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         df_out = df_out.iloc[:, [-1]+list(range(0, len(df_out.columns)-1)) ]
 
         self.df_out = df_out
-
-    def build_body(self, str_template_file, di_params=None):
-        templateLoader = jinja2.FileSystemLoader(searchpath=self.config['global']['global_templates'])
-        templateEnv = jinja2.Environment(loader=templateLoader)
-        template = templateEnv.get_template(str_template_file)
-        return template.render(di_params)  # Return email body, generated with template.
 
     @dec_err_handler(retries=0)
     def send(self, str_listname=None, str_subject=None):
