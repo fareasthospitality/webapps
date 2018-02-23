@@ -139,6 +139,7 @@ class AdminReportBot(ReportBot):
         SELECT email FROM mail_list
         WHERE listname = '{}'
         AND subscribed = 1
+        ORDER BY email
         """.format(str_listname)  # listname here
         df = pd.read_sql(str_sql, self.db_listman_conn)
         l_email_recipients = df['email'].tolist()
@@ -352,6 +353,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         SELECT email FROM mail_list
         WHERE listname = '{}'
         AND subscribed = 1
+        ORDER BY email
         """.format(str_listname)  # listname here
         df = pd.read_sql(str_sql, self.db_listman_conn)
         l_email_recipients = df['email'].tolist()
