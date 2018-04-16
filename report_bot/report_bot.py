@@ -126,7 +126,12 @@ class AdminReportBot(ReportBot):
         str_msg2 = kwargs['str_msg2']
         df = kwargs['df']
 
-        str_df = df.to_html(index=False, na_rep='', justify='left')
+        # This will allow df to be None!
+        try:
+            str_df = df.to_html(index=False, na_rep='', justify='left')
+        except AttributeError:  # handle "AttributeError: 'NoneType' object has no attribute 'to_html'"
+            str_df = ''
+
         di_params = {'str_msg': str_msg,
                      'str_df': str_df,
                      'str_msg2': str_msg2,
@@ -164,9 +169,11 @@ class AdminReportBot(ReportBot):
         s = smtplib.SMTP(host=MAIL_SERVER)
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
+
         # os.remove(self.str_email_attach_fn)  # Delete the Excel file.
 
         # Write to log file #
+        # Note: All sent emails will be logged. This includes emails which were sent by other applications, which leverage upon ReportBot's functionalities!
         self.logger.info('Sent email with subject "{}"'.format(str_subject))
 
 
@@ -323,7 +330,10 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
 
         # Map new hotel codes to old hotel codes.
         #df_hotel_codes = pd.read_excel('C:/AA/python/mapping/mapping_hotel_codes.xlsx', keep_default_na=False, na_values=[' '])
-        df_hotel_codes = pd.read_sql('SELECT * FROM cfg_map_hotel_sr', self.db_fehdw_conn)
+        str_sql = """
+        SELECT * FROM cfg_map_properties WHERE operator = 'feh' 
+        """
+        df_hotel_codes = pd.read_sql(str_sql, self.db_fehdw_conn)
         df_out.index = Series(df_out.index).map(Series(list(df_hotel_codes['new_code']), index=df_hotel_codes['old_code']))
         df_out = df_out[['not_collected', 'invalid', 'valid']]
         df_out = round(df_out * 100, 1)  # convert to percentage (based on 100)
