@@ -46,6 +46,29 @@ sys.path.insert(0, Monitor.config['global']['global_apps_root'])  # Insert paren
 from utils import dec_err_handler  # utils.py is a shared resource across webapps.
 
 
+@app.route('/show_schedules')
+def show_schedules():
+    """ Dumps the ordered records of the schedules for data loading and data running, respectively.
+    :return:
+    """
+    moni = Monitor()
+    str_msg = ''
+
+    # Data load schedule
+    str_sql = """ SELECT * FROM sys_cfg_dataload_sched ORDER BY time_from, source """
+    df = pd.read_sql(str_sql, moni.db_fehdw_conn)
+    str_msg += df.to_html(index=False, na_rep='', justify='left')
+
+    str_msg += '<br><br>'
+
+    # Data run schedule
+    str_sql = """ SELECT * FROM sys_cfg_datarun_sched ORDER BY time_from, seq """
+    df = pd.read_sql(str_sql, moni.db_fehdw_conn)
+    str_msg += df.to_html(index=False, na_rep='', justify='left')
+
+    return str_msg
+
+
 @app.route('/show_mail_lists')
 def show_mail_lists():
     """ Dumps the ordered records of the mailing list table.
