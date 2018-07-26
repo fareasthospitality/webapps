@@ -81,6 +81,7 @@ def show_mail_lists():
     str_msg += df.to_html(index=False, na_rep='', justify='left')
     return str_msg
 
+
 @app.route('/logs')
 def show_logs():
     """ Dumps the filtered and ordered records of the dataload or datarun logging tables, depending on "type" parameter value.
