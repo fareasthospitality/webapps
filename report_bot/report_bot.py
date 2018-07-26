@@ -155,8 +155,7 @@ class AdminReportBot(ReportBot):
 
         msg = MIMEMultipart()
         msg['From'] = SENDER
-        str = ','.join(l_email_recipients)  # Assumes no non-ASCII chars in emails.
-        msg['To'] = str
+        msg['To'] = ','.join(l_email_recipients)
         msg['Subject'] = str_subject
         msg.attach(MIMEText(str_html, 'html'))
 
@@ -392,7 +391,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         os.remove(self.str_email_attach_fn)  # Delete the Excel file.
 
         # Write to log file #
-        self.logger.info('Sent email to list "{}" with subject "{}"'.format(str_listname, str_subject))
+        self.logger.info('Sent email with subject "{}"'.format(str_subject))
 
     @dec_err_handler(retries=0)
     def send_op_repeat_guest_monitor(self, str_listname=None, str_subject=None):

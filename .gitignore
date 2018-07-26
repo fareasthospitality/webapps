@@ -1,12 +1,7 @@
 # PROJECT SPECIFIC #
 ################### https://github.com/github/gitignore
 *.conf
-*.xlsx
-*.xls
-*.xml
 todo.txt
-.ipynb_checkpoints/
-.ipynb
 logs/
 temp/
 test_data/
