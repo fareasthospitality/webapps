@@ -8,6 +8,7 @@ import logging
 import sqlalchemy
 from configobj import ConfigObj
 import smtplib
+import pysftp
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -180,7 +181,7 @@ class AdminReportBot(ReportBot):
 
 class OperaEmailQualityMonitorReportBot(ReportBot):
     # Get labels for Opera columns.
-    fn_op_mt = '//10.0.2.251/fesftp/Mapping table/Opera Text File mapping.xlsx'  # Note that to access from outside, must share out the folder. Check via \\10.0.2.251 in WinExplorer.
+    fn_op_mt = 'C:/fehdw/config/Opera Text File mapping.xlsx'
     df = pd.read_excel(io=fn_op_mt, sheet_name='Sheet2', skiprows=1, keep_default_na=False, na_values=' ')
     df.drop(labels=df.columns[2:], axis=1, inplace=True)  # Drop all columns starting from 3rd column.
     df.columns = ['code', 'name']
@@ -241,8 +242,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         return df_op_data
 
     def get_df_from_all_opera_files(self, str_dir='//10.0.2.251/fesftp/Opera', dt_from=None, dt_to=None):
-        """
-        To go through all TXT files (Opera files) in hardcoded directory, keeping only rows where ArrivalDate is between specified date parameters.
+        """ To go through all TXT files (Opera files) in hardcoded directory, keeping only rows where ArrivalDate is between specified date parameters.
         dt_from, dt_to. Input datetime objects.
         Returns a DataFrame.    """
 
@@ -250,8 +250,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         # str_last_month = 'SEP'  # DEBUG
 
         r = re.compile('.+Historical.+txt$')  # Format: " *Historical*.txt ".
-        l_op_files = list(filter(r.match, list(os.walk(str_dir))[0][
-            2]))  # List of raw Opera files to aggregate. Picks ALL files in directory.
+        l_op_files = list(filter(r.match, list(os.walk(str_dir))[0][2]))  # List of raw Opera files to aggregate. Picks ALL files in directory.
 
         df_in = DataFrame()
 
@@ -265,6 +264,99 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
 
         return df_in
 
+    def get_df_from_opera_file_sftp(self, sftp_srv=None, str_folder_remote=None, fn=None, str_dt_from=None, str_dt_to=None):
+        """ Given a filename fn, open a connection to the configured SFTP server. Changed working directory to str_folder_remote.
+        Read the file (specially formatted) and swap the column names as per mapping Excel file.
+        Apply filters (very specific logic). Filters include dt_from <= arrival_date <= dt_to.
+        Return the DataFrame.
+        :param sftp_srv: If SFTP connection is supplied, use this instead of opening a new one.
+        :param str_folder_remote: The SFTP folder where we should be based.
+        :param str_dt_from:
+        :param str_dt_to:
+        :return:
+        """
+        # CREATE SFTP CONNECTION TO REMOTE SERVER. ONLY IF NOT SUPPLIED. THIS MAKES IS FASTER THAN REPEATEDLY RE-OPENING CONNECTIONS. #
+        if sftp_srv is None:
+            cnopts = pysftp.CnOpts()
+            cnopts.hostkeys = None
+            str_host = self.config['sftp']['sftp_server']
+            str_userid = self.config['sftp']['userid']
+            str_pw = self.config['sftp']['password']
+            str_folder_remote = str_folder_remote  #'/C/FESFTP/Opera'
+            srv = pysftp.Connection(host=str_host, username=str_userid, password=str_pw, cnopts=cnopts)
+            srv.cwd(str_folder_remote)  # Change current working dir to here.
+        else:
+            srv = sftp_srv
+
+        dt_from = pd.to_datetime(str_dt_from)  # Type conversion, so can do comparison later.
+        dt_to = pd.to_datetime(str_dt_to)
+
+        with srv.open(fn) as fo:  # Auto file close.
+            df_op_data = pd.read_csv(fo, sep='|', skiprows=2, skipfooter=2, keep_default_na=False, na_values=' ',
+                                     engine='python', error_bad_lines=False, quoting=3)
+        # Iterate through Opera Code to OperaFieldName mapping table. Swap out codes for names, in the other df.
+        for idx, row in self.df_op_labels.iterrows():
+            df_op_data.rename(columns={row['code']: row['name']},
+                              inplace=True)  # eg: df_op_data.rename(columns={'C93': 'Origin'}
+
+        df_op_data.columns = df_op_data.columns.str.lower()  # Convert all column names to lowercase.
+        df_op_data.drop(labels='', axis=1, inplace=True)  # Drop the column for the blank colname. All values are blank.
+
+        # Column names -> underscores instead of spaces.
+        df_op_data.columns = [x.replace(' ', '_') for x in list(df_op_data.columns)]
+
+        # Filter away Airline crew and Wholesales Groups, as identified by the market_code field of the Opera transaction.
+        df_op_data = df_op_data[~(df_op_data['market_code'].isin(['ALC', 'ALI', 'WHG']))]
+        # Filter away 'CANCELLED' and 'NO SHOW' bookings.
+        df_op_data = df_op_data[~(df_op_data['reservation_status'].isin(['CANCELLED', 'NO SHOW']))]
+        # Filter away pseudo rooms.
+        df_op_data = df_op_data[~(df_op_data['stayed_room_type'].isin(['PM']))]
+        # Filter away rate_code = 'SHR'. Room sharers are not required to give their emails in the hotel registration card.
+        df_op_data = df_op_data[~(df_op_data['rate_code'].isin(['SHR']))]
+        # Convert 'arrival_date' to datetime format.
+        df_op_data['arrival_date_dt'] = pd.to_datetime(
+            df_op_data['arrival_date'].apply(lambda x: x[0:-2] + '20' + x[-2:]),
+            format='%d-%b-%Y')
+        # Filter by 'arrival_date_dt' to contain only rows in between dt_from and dt_to.
+        df_op_data = df_op_data[(df_op_data['arrival_date_dt'] >= dt_from) & (df_op_data['arrival_date_dt'] <= dt_to)]
+
+        return df_op_data
+
+    def get_df_from_all_opera_files_sftp(self, str_folder_remote='/C/FESFTP/Opera', str_dt_from=None, str_dt_to=None):
+        """ Given a (hardcoded) remote folder, read all "*Historical*.txt" files.
+        Filter str_dt_from <= arrival_date <= str_dt_to. Return the consolidated DataFrame.
+        :param str_folder_remote:
+        :param str_dt_from:
+        :param str_dt_to:
+        :return:
+        """
+        str_host = self.config['sftp']['sftp_server']
+        str_userid = self.config['sftp']['userid']
+        str_pw = self.config['sftp']['password']
+
+        # CREATE SFTP CONNECTION TO REMOTE SERVER #
+        cnopts = pysftp.CnOpts()
+        cnopts.hostkeys = None
+        srv = pysftp.Connection(host=str_host, username=str_userid, password=str_pw, cnopts=cnopts)
+        srv.cwd(str_folder_remote)  # Change current working dir to here.
+
+        r = re.compile('.+Historical.+txt$')  # Format: " *Historical*.txt ".
+
+        l_op_files = list(filter(r.match, srv.listdir()))  # List of raw Opera files to aggregate. Picks ALL files in directory.
+
+        df_in = DataFrame()
+
+        for file in l_op_files:
+            if srv.isfile(file):
+                df_temp = self.get_df_from_opera_file_sftp(sftp_srv=srv, str_folder_remote=str_folder_remote, fn=file, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
+                df_in = df_in.append(df_temp, ignore_index=True)
+
+        # Drop any possible duplicates of 'confirmation_number', keeping the first occurrence.
+        df_in = df_in[~df_in['confirmation_number'].duplicated(keep='first')]
+
+        srv.close()
+        return df_in
+
     @dec_err_handler(retries=0)
     def get(self, str_dt_from, str_dt_to):
         # Specify Period. By default, program will take last 7 day period (up to the day before).
@@ -276,7 +368,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         self.str_dt_to = str_dt_to
 
         # Get data from text files.
-        df_op = self.get_df_from_all_opera_files(dt_from=pd.to_datetime(str_dt_from), dt_to=pd.to_datetime(str_dt_to))
+        df_op = self.get_df_from_all_opera_files_sftp(str_dt_from=str_dt_from, str_dt_to=str_dt_to)  # Get using SFTP protocol.
         self.df_op = df_op  # Work-around. Solely for use with send_op_repeat_guest_monitor().
 
         # Create XLSX file to send as email attachment; delete file immediately after sending.
