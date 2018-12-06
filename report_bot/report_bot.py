@@ -19,7 +19,7 @@ from utils import dec_err_handler
 
 class ReportBot(object):
     config = ConfigObj('C:/webapps/report_bot/report_bot.conf')
-    SMTP = config['smtp']  # dict structure containing data related to mail server.
+    # SMTP = config['smtp']  # dict structure containing data related to mail server.
     # MAIL_SERVER = config['smtp']['mail_server']
     # PORT = config['smtp']['port']
     # FROM_NAME = config['smtp']['from_name']
@@ -151,8 +151,9 @@ class AdminReportBot(ReportBot):
         l_email_recipients = df['email'].tolist()
 
         # SEND EMAIL #
-        MAIL_SERVER = self.SMTP['mail_server']
-        SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
+        MAIL_SERVER = self.config['smtp']['mail_server']
+        SENDER = self.config['smtp']['from_name'] + ' <' + self.config['smtp']['from_email'] + '>'
+        PORT = self.config['smtp']['port']
 
         msg = MIMEMultipart()
         msg['From'] = SENDER
@@ -168,7 +169,7 @@ class AdminReportBot(ReportBot):
         # msg.attach(part)
 
         # Send the message via our SMTP server #
-        s = smtplib.SMTP(host=MAIL_SERVER)
+        s = smtplib.SMTP(host=MAIL_SERVER, port=PORT)
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
 
@@ -462,8 +463,9 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         l_email_recipients = df['email'].tolist()
 
         # SEND EMAIL #
-        MAIL_SERVER = self.SMTP['mail_server']
-        SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
+        MAIL_SERVER = self.config['smtp']['mail_server']
+        SENDER = self.config['smtp']['from_name'] + ' <' + self.config['smtp']['from_email'] + '>'
+        PORT = self.config['smtp']['port']
 
         msg = MIMEMultipart()
         msg['From'] = SENDER
@@ -478,7 +480,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         msg.attach(part)
 
         # Send the message via our SMTP server #
-        s = smtplib.SMTP(host=MAIL_SERVER)
+        s = smtplib.SMTP(host=MAIL_SERVER, port=PORT)
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
         os.remove(self.str_email_attach_fn)  # Delete the Excel file.
