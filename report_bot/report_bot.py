@@ -534,8 +534,10 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         l_email_recipients = df['email'].tolist()
 
         # SEND EMAIL #
-        MAIL_SERVER = self.SMTP['mail_server']
-        SENDER = self.SMTP['from_name'] + ' <' + self.SMTP['from_email'] + '>'
+        # SEND EMAIL #
+        MAIL_SERVER = self.config['smtp']['mail_server']
+        SENDER = self.config['smtp']['from_name'] + ' <' + self.config['smtp']['from_email'] + '>'
+        PORT = self.config['smtp']['port']
 
         msg = MIMEMultipart()
         msg['From'] = SENDER
@@ -544,7 +546,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         msg.attach(MIMEText(str_html, 'html'))
 
         # Send the message via our SMTP server #
-        s = smtplib.SMTP(host=MAIL_SERVER)
+        s = smtplib.SMTP(host=MAIL_SERVER, port=PORT)
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
         os.remove(self.str_email_attach_fn)  # Delete the Excel file.
