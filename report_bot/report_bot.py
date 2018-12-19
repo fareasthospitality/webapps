@@ -428,7 +428,7 @@ class OperaEmailQualityMonitorReportBot(ReportBot):
         SELECT * FROM cfg_map_properties WHERE operator = 'feh' 
         """
         df_hotel_codes = pd.read_sql(str_sql, self.db_fehdw_conn)
-        df_out.index = Series(df_out.index).map(Series(list(df_hotel_codes['new_code']), index=df_hotel_codes['old_code']))
+        df_out.index = Series(df_out.index).map(Series(list(df_hotel_codes['new_code']), index=df_hotel_codes['hotel_code']))
         df_out = df_out[['not_collected', 'invalid', 'valid']]
         df_out = round(df_out * 100, 1)  # convert to percentage (based on 100)
         df_out.reset_index(drop=False, inplace=True)
