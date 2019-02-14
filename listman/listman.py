@@ -197,7 +197,7 @@ def subscribe_unsubscribe():
     str_action = request.args.get('action')  # sub/unsub. None if key not found.
     str_listname = request.args.get('listname')
     str_email = request.args.get('email')
-    #http://fehdw.fareast.com.sg/listman?action=sub&listname=op_email_quality_monitor&email=amosang@fareast.com.sg
+    #http://azrorca.fareast.com.sg/listman?action=sub&listname=op_email_quality_monitor&email=amosang@fareast.com.sg
 
     # VALIDATE INPUT STRINGS #
     if (str_action is None) | (str_listname is None) | (str_email is None):
@@ -205,7 +205,7 @@ def subscribe_unsubscribe():
         Please ensure that all input parameters are filled correctly. <br/>
         A valid command would be <br/>
         <pre>
-        {html.escape('http://fehdw.fareast.com.sg/listman?action=<sub|unsub>&listname=<VALID_LISTNAME>&email=<VALID_EMAIL>')}        
+        {html.escape('http://azrorca.fareast.com.sg/listman?action=<sub|unsub>&listname=<VALID_LISTNAME>&email=<VALID_EMAIL>')}        
         </pre>
         """
     else:

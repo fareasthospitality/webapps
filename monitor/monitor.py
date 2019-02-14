@@ -87,7 +87,7 @@ def show_logs():
     """ Dumps the filtered and ordered records of the dataload or datarun logging tables, depending on "type" parameter value.
     Access path is ~/monitor/logs in Production server.
     Sample call from debugging server => http://127.0.0.1:5000/logs?type=datarun&date=2018-04-16&days=1
-    Sample call from production server => http://fehdw.fareast.com.sg/monitor/logs?type=datarun&date=2018-02-20&days=5
+    Sample call from production server => http://azrorca.fareast.com.sg/monitor/logs?type=datarun&date=2018-02-20&days=5
     :return: NA
     """
     moni = Monitor()

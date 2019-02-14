@@ -4,6 +4,8 @@ import sys
 import datetime as dt
 import time
 import logging
+import pandas as pd
+from pandas import DataFrame, Series
 
 
 def dec_err_handler(retries=0):
@@ -38,6 +40,40 @@ def dec_err_handler(retries=0):
         wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
         return wrapped_err_handler
     return wrap
+
+
+def get_date_ranges(str_dt_ref=None, l_periods=[]):
+    """ Utility function to return pair-tuples of strings demarcating start_date and end_date of the requested period.
+    Note: The period for "past N days" will not include current date. Eg: If today is 8 Jan, period of past 7 days will be 1 Jan to 7 Jan (INCLUSIVE of boundary dates).
+
+    :param str_dt_ref: Reference date from which to make our calculations. Will default to current date if None.
+    :param l_periods: Valid values include MTD/YTD/P90D/P7D.
+    :return: di_periods: dict structure with period names as key and 2-tuples as value (str_dt_from, str_dt_to). Note that values are STRINGS!
+    """
+    # Get Reference Date.
+    if str_dt_ref is None:
+        dt_ref = dt.datetime.today().date()
+    else:
+        dt_ref = pd.to_datetime(str_dt_ref)
+
+    # CALCULATE PERIODS #
+    di_periods = {}
+    str_dt_to = (dt_ref + pd.Timedelta(days=-1)).strftime('%Y-%m-%d')
+
+    for period in l_periods:
+        if period == 'MTD':
+            str_dt_from = dt_ref.replace(day=1).strftime('%Y-%m-%d')
+            di_periods[period] = (str_dt_from, str_dt_to)  # from first date of month
+        elif period == 'YTD':
+            str_dt_from = dt_ref.replace(day=1, month=1).strftime('%Y-%m-%d')
+            di_periods[period] = (str_dt_from, str_dt_to)  # from first date of year
+        elif period == 'P07D':
+            str_dt_from = (dt_ref + pd.Timedelta(days=-7)).strftime('%Y-%m-%d')
+            di_periods[period] = (str_dt_from, str_dt_to)  # from 7 days ago
+        elif period == 'P90D':
+            str_dt_from = (dt_ref + pd.Timedelta(days=-90)).strftime('%Y-%m-%d')
+            di_periods[period] = (str_dt_from, str_dt_to)  # from 90 days ago
+    return di_periods
 
 
 def get_latest_file(str_folder=None, pattern=None):
@@ -85,3 +121,26 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
             return [(os.path.join(str_folder, fn), fn) for fn in l_files if re.search(pattern, fn)]
     else:
         return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return a 2-values tuple!
+
+
+def get_curr_time_as_string(format='%Y%m%d_%H%M', dt_date=None, leading_underscore=True):
+    """ Returns current timestamp as a string.
+    Convenience function. Timestamps are frequently used in filenames, to make them unique.
+    Default format is eg: 'YYYYMMDD_hhmm'
+
+    :param format: Use this format if specified.
+    :param dt: Converts this date object if specified, otherwise uses current timestamp.
+    :param leading_underscore: Prefix the return string with an underscore if True.
+    :return: The formatted string.
+    """
+    if dt_date is None:
+        dt_temp = dt.datetime.today()  # By default, take current timestamp.
+    else:
+        dt_temp = dt_date
+
+    str_out = dt_temp.strftime(format=format)
+
+    if leading_underscore:
+        str_out = '_' + str_out
+
+    return str_out

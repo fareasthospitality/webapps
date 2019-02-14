@@ -1,5 +1,6 @@
 import datetime as dt
 import jinja2
+import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 import os
@@ -9,12 +10,15 @@ import sqlalchemy
 from configobj import ConfigObj
 import smtplib
 import pysftp
+import shutil
+import time
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email import encoders
 
-from utils import dec_err_handler
+from utils import dec_err_handler, get_curr_time_as_string, get_date_ranges, get_files
+from selenium.webdriver.common.action_chains import ActionChains
 
 
 class ReportBot(object):
@@ -178,6 +182,456 @@ class AdminReportBot(ReportBot):
         # Write to log file #
         # Note: All sent emails will be logged. This includes emails which were sent by other applications, which leverage upon ReportBot's functionalities!
         self.logger.info('Sent email with subject "{}"'.format(str_subject))
+
+
+class STRReportBot(ReportBot):
+    def __init__(self):
+        super().__init__()
+        # INIT LOGGER #
+        self._init_logger(logger_name='str_report_bot')
+
+    def __del__(self):
+        super().__del__()
+
+    @dec_err_handler(retries=0)
+    def send_str_perf_weekly(self):
+        """ Downloads STR data, and emails it to the specified mailing list.
+        NOTE: This same code has been copied over to the ReportBot application, and it is THAT copy which is running every week!
+        There was some problem with circular imports (AdminReportBot is imported by feh.datareader <- feh.utils, so we cannot import feh.datareader from STRReportBot!)
+        So a copy of this code, along with the supporting config, were copied over.
+
+        DESIGN: Firstly, all the files are download for a specific period (eg: 'MTD'). This is done in
+        download_rpt_basic_perf_01(), download_rpt_basic_perf_01a(), download_rpt_basic_perf_01b()
+        Next the read_rpt_basic_perf_01() and read_rpt_basic_perf_01_all() are used to read the files in a df.
+        The df is appended, for all period_name.
+        """
+        str_listname = 'str_perf_rpt_weekly'  # Mailing listname
+        str_subject = 'STR Weekly Report - Raw Data'
+        str_msg = """
+        <strong>Hello team!</strong>
+        <br>
+        I've finished copying-and-pasting the data from STR, as attached, for your weekly reporting activity.
+        I've also included the execution time of the report in the filename, for your convenience.
+        <br><br>
+        Best regards,
+        <br>
+        Ah Bee
+        """
+        str_msg2 = ''
+        str_df = ''
+
+        di_params = {'str_msg': str_msg,
+                     'str_df': str_df,
+                     'str_msg2': str_msg2,
+                     'year': dt.datetime.now().year
+                     }
+        str_html = self.build_body(str_template_file='jinja_basic_frame.html', di_params=di_params)
+
+        # Determine email recipients from listname #
+        str_sql = """
+        SELECT email FROM mail_list
+        WHERE listname = '{}'
+        AND subscribed = 1
+        ORDER BY email
+        """.format(str_listname)  # listname here
+        df = pd.read_sql(str_sql, self.db_listman_conn)
+        l_email_recipients = df['email'].tolist()
+
+        # GET DATAFRAME AND OUTPUT TO XLSX FILE #
+        df_str = self.get_str_perf_weekly()
+        str_fn_out = 'STR_Weekly_Report' + get_curr_time_as_string() + '.xlsx'
+        str_fp_out = 'C:/fehdw/temp/' + str_fn_out
+        df_str.to_excel(str_fp_out, index=False)
+
+        # # DEBUG
+        # str_fp_out = 'C:/1/STR_Perf_Weekly_2.xlsx'  # temp test Excel file
+
+        # SEND EMAIL #
+        MAIL_SERVER = self.config['smtp']['mail_server']
+        SENDER = self.config['smtp']['from_name'] + ' <' + self.config['smtp']['from_email'] + '>'
+        PORT = self.config['smtp']['port']
+
+        msg = MIMEMultipart()
+        msg['From'] = SENDER
+        str_temp = ','.join(l_email_recipients)  # Assumes no non-ASCII chars in emails.
+        msg['To'] = str_temp
+        msg['Subject'] = str_subject
+        msg.attach(MIMEText(str_html, 'html'))
+
+        part = MIMEBase('application', "octet-stream")
+        part.set_payload(open(str_fp_out, 'rb').read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', 'attachment; filename="{}"'.format(str_fn_out))
+        msg.attach(part)
+
+        # Send the message via our SMTP server #
+        s = smtplib.SMTP(host=MAIL_SERVER, port=PORT)
+        s.sendmail(SENDER, l_email_recipients, msg.as_string())
+        s.quit()
+
+        # os.remove(self.str_email_attach_fn)  # Delete the Excel file.
+
+        # Write to log file #
+        # Note: All sent emails will be logged. This includes emails which were sent by other applications, which leverage upon ReportBot's functionalities!
+        self.logger.info('Sent email with subject "{}"'.format(str_subject))
+
+    def download_rpt_basic_perf_01(self, str_dt_from, str_dt_to):
+        """ Downloads the STR STAR basic report by Property, for specified date range.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import NoSuchElementException
+
+        # GET LIST OF HOTELS #
+        # 10 hotels (excl VHS, OSKL).
+        str_sql = """
+        SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
+        WHERE operator = 'feh'
+        AND asset_type = 'hotel'
+        AND country = 'SG'  -- Excl 'OSKL'
+        AND str_hotel_id IS NOT NULL
+        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        ORDER BY str_hotel_name
+        """
+        df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
+
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        # LOGIN #
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
+        driver.get('https://clients.str.com/ReportsOnline.aspx')
+        input_email = driver.find_element_by_xpath('//*[@id="username"]')
+        input_email.send_keys(self.config['data_sources']['str']['userid'])
+        input_password = driver.find_element_by_xpath('//*[@id="password"]')
+        input_password.send_keys(self.config['data_sources']['str']['password'])
+        input_password.submit()  # Walks up the tree until it finds the enclosing Form, and submits that. http://selenium-python.readthedocs.io/navigating.html
+
+        # Go to STAR report selection page.
+        time.sleep(2)  # Wait for page to load before trying to access it.
+        driver.find_element_by_xpath('//*[@id="menu-reports"]/a').click()
+
+        wn_handle = driver.current_window_handle  # original window handle of the main browser tab.
+
+        for idx, row in df_hotels.iterrows():
+            # SELECT HOTEL IN DDLB #
+            self.logger.info('DOWNLOADING STR REPORT (PROPERTY): ' + row['str_hotel_name'])
+            str_xpath = "//*[@id='ctl00_CensusID']/option[@value='{}']".format(row['str_hotel_id'])
+
+            # el_hotel_ddlb = driver.find_element_by_xpath(
+            #     '//*[@id="ctl00_CensusID"]')  # The dropdown at the top select for hotel selection. Selecting the DDLB is different from selecting its Options!
+            el_hotel = driver.find_element_by_xpath(str_xpath)
+            el_hotel.click()
+
+            # CHANGE DATE RANGE SELECTION #
+            input_dt_from = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtStartDate"]')
+            input_dt_from.clear()
+            input_dt_from.send_keys(str_dt_from)
+            input_dt_to = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtEndDate"]')
+            input_dt_to.clear()
+            input_dt_to.send_keys(str_dt_to)
+
+            # SUBMIT #
+            driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
+
+            # Switches back to the original browser tab (Note: For some reason, this will leave the new tabs opened until browser is closed)
+            driver.switch_to.window(wn_handle)
+
+        # LOGOUT #
+        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        driver.quit()  # Quit the browser
+
+    def download_rpt_basic_perf_01a(self, str_dt_from, str_dt_to):
+        """ Downloads the STR STAR basic report for ALL portfolio properties, for specified date range.
+        Differs from download_rpt_basic_perf_01() in that we're running STAR report on the PORTFOLIO instead of property.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import NoSuchElementException
+
+        self.logger.info('DOWNLOADING STR REPORT (ALL)')
+
+        # GET LIST OF HOTELS #
+        # 10 hotels (excl VHS, OSKL).
+        str_sql = """
+        SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
+        WHERE operator = 'feh'
+        AND asset_type = 'hotel'
+        AND country = 'SG'  -- Excl 'OSKL'
+        AND str_hotel_id IS NOT NULL
+        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        ORDER BY str_hotel_name
+        """
+        df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
+
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        # LOGIN #
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
+        driver.get('https://clients.str.com/ReportsOnline.aspx')
+        input_email = driver.find_element_by_xpath('//*[@id="username"]')
+        input_email.send_keys(self.config['data_sources']['str']['userid'])
+        input_password = driver.find_element_by_xpath('//*[@id="password"]')
+        input_password.send_keys(self.config['data_sources']['str']['password'])
+        input_password.submit()  # Walks up the tree until it finds the enclosing Form, and submits that. http://selenium-python.readthedocs.io/navigating.html
+
+        # Go to STAR report selection page.
+        time.sleep(2)  # Wait for page to load before trying to access it.
+        driver.find_element_by_xpath('//*[@id="menu-reports"]/a').click()
+
+        for idx, row in df_hotels.iterrows():
+            # SELECT HOTELS IN MULTISELECT #
+            str_xpath = "option[@value='{}']".format(row['str_hotel_id'])
+            try:
+                el_multiselect = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_sProperty"]')  # Focus on the multiselect (list of hotels).
+                opt_hotel = el_multiselect.find_element_by_xpath(str_xpath)
+            except NoSuchElementException:
+                continue  # Cannot find in the multiselect, so skip this hotel
+            if opt_hotel is not None:
+                actions = ActionChains(driver)  # For some reason, must always re-instantiate to get new one. Otherwise cannot double-click a second time.
+                actions.double_click(opt_hotel).perform()
+
+        # Click the "Duplicates?" checkbox if not checked already. We want to EXCLUDE duplicates by unchecking.
+        el_cb = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_ckIncDups"]')
+        if el_cb.get_attribute('checked'):
+            el_cb.click()
+
+        # # CHANGE DATE RANGE SELECTION #
+        input_dt_from = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtStartDate"]')
+        input_dt_from.clear()
+        input_dt_from.send_keys(str_dt_from)
+        input_dt_to = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtEndDate"]')
+        input_dt_to.clear()
+        input_dt_to.send_keys(str_dt_to)
+
+        # SUBMIT #
+        driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
+
+        # LOGOUT #
+        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        driver.quit()  # Quit the browser
+
+    def download_rpt_basic_perf_01b(self, str_dt_from, str_dt_to, str_ind_seg):
+        """ Downloads the STR STAR basic report for ALL portfolio properties, for specified date range.
+        Differs from download_rpt_basic_perf_01a(). This one compares the 3 metrics against Industry Segment rather than against compset.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import NoSuchElementException
+
+        self.logger.info('DOWNLOADING STR REPORT (IND_SEG: {})'.format(str_ind_seg))
+
+        # GET LIST OF HOTELS #
+        # 10 hotels (excl VHS, OSKL).
+        str_sql = """
+        SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
+        WHERE operator = 'feh'
+        AND asset_type = 'hotel'
+        AND country = 'SG'  -- Excl 'OSKL'
+        AND str_hotel_id IS NOT NULL
+        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        ORDER BY str_hotel_name
+        """
+        df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
+
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        # LOGIN #
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
+        driver.get('https://clients.str.com/ReportsOnline.aspx')
+        input_email = driver.find_element_by_xpath('//*[@id="username"]')
+        input_email.send_keys(self.config['data_sources']['str']['userid'])
+        input_password = driver.find_element_by_xpath('//*[@id="password"]')
+        input_password.send_keys(self.config['data_sources']['str']['password'])
+        input_password.submit()  # Walks up the tree until it finds the enclosing Form, and submits that. http://selenium-python.readthedocs.io/navigating.html
+
+        # Go to STAR report selection page.
+        time.sleep(2)  # Wait for page to load before trying to access it.
+        driver.find_element_by_xpath('//*[@id="menu-reports"]/a').click()
+
+        for idx, row in df_hotels.iterrows():
+            # SELECT HOTELS IN MULTISELECT #
+            str_xpath = "option[@value='{}']".format(row['str_hotel_id'])
+            try:
+                el_multiselect = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_sProperty"]')  # Focus on the multiselect (list of hotels).
+                opt_hotel = el_multiselect.find_element_by_xpath(str_xpath)
+            except NoSuchElementException:
+                continue  # Cannot find in the multiselect, so skip this hotel
+            if opt_hotel is not None:
+                actions = ActionChains(driver)  # For some reason, must always re-instantiate to get new one. Otherwise cannot double-click a second time.
+                actions.double_click(opt_hotel).perform()
+
+        # Click "My industry segments" radiobutton.
+        driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_rbIndSegment"]').click()
+
+        if str_ind_seg == 'upscale':
+            driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_sSelectGrp2Segment"]/option[@value="Market Class: Singapore - Upscale Class"]').click()
+            driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnGrp2Select"]').click()
+        elif str_ind_seg == 'upper_upscale':
+            driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_sSelectGrp2Segment"]/option[@value="Market Class: Singapore - Upper Upscale Class"]').click()
+            driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnGrp2Select"]').click()
+
+        # # CHANGE DATE RANGE SELECTION #
+        input_dt_from = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtStartDate"]')
+        input_dt_from.clear()
+        input_dt_from.send_keys(str_dt_from)
+        input_dt_to = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtEndDate"]')
+        input_dt_to.clear()
+        input_dt_to.send_keys(str_dt_to)
+
+        # SUBMIT #
+        driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
+
+        # LOGOUT #
+        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        driver.quit()  # Quit the browser
+
+    def read_rpt_basic_perf_01(self, str_fn, str_dt_from, str_dt_to, str_period_name):
+        """ Given an XLS file, read the pre-prescribed line of data. Obtain only the row of data in the "Period" line.
+        Basically, we want to get all columns of data, for the "Period" line.
+        Note: "str_hotel_id" is translated to "hotel_code" through the mapping table cfg_map_properties.
+        :param str_fn: The STR STAR report XLS file to read.
+        :param str_dt_from: Used only to demarcate period start/end.
+        :param str_dt_to: Used only to demarcate period start/end.
+        :param str_period_name: Used to indicate what this period is (eg: "MTD", "YTD").
+        :return:
+        """
+        df = pd.read_excel(str_fn, skiprows=1, nrows=1, header=None)  # Second row of the STR report contains the keys we want.
+
+        str_hotel_name_row = df[1][0]
+        if str_hotel_name_row.count('#') > 1:  # If there are multiple '#' in the raw string, means there are multiple hotels, ie: not for a single property.
+            str_hotel_code = 'ALL'
+        else:
+            # Get the STR Hotel ID from the Excel cell.
+            # "str_hotel_id" -> means STR Hotel ID, not "string"!
+            str_hotel_id = re.search('(?<=#)\d+', str_hotel_name_row)[0]  # eg: 'The Elizabeth Hotel #123456'
+
+            # GET HOTEL CODE FROM PROPERTY NAME #
+            str_sql = """
+            SELECT hotel_code FROM cfg_map_properties
+            WHERE str_hotel_id = '{}'
+            """.format(str_hotel_id)
+            df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
+
+            str_hotel_code = df_hotels['hotel_code'][0]  # Assumes there's only 1 row returned.
+
+        # Cater for "Industry Segment" report rather than by compset.
+        # Note: Do NOT use "else" clause here -- if str_hotel_code is anyway other than expected values, the insertions will not take place and code will crash (expecting EXACTLY 18 columns!).
+        if str_hotel_code == 'ALL':
+            df = pd.read_excel(str_fn, skiprows=2, nrows=1, header=None)  # Third row of the STR report contains the keys we want.
+            str_cell = df[1][0]
+            if str_cell == 'Industry: Market Class: Singapore - Upscale':  # SEARCH STRING!
+                str_hotel_code = 'ALL_UPSC'
+            elif str_cell == 'Industry: Market Class: Singapore - Upper Upscale':  # SEARCH STRING!
+                str_hotel_code = 'ALL_UPPER_UPSC'
+
+        # GET PERIOD LINE's ALL DATA #
+        df = pd.read_excel(str_fn, skiprows=6)
+        df = df[df['Date'] == 'Period']  # "Period" line.
+        df.dropna(axis=1, inplace=True)  # Drop blank columns
+        df.drop(['Date'], axis=1, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+
+        # The file for "ALL" hotels has 3 less columns (15 instead of 18) because the 3 "rank" columns are not there. To insert NaNs into the correct positions.
+        if str_hotel_code == 'ALL':
+            df.insert(5, column='occ_rank', value=np.nan)
+            df.insert(11, column='adr_rank', value=np.nan)
+            df.insert(len(df.loc[0, :]), column='revpar_rank', value=np.nan)
+
+        # The file for Industry Segment has 6 less columns (missing "ranking" and the 3 metrics)
+        if (str_hotel_code == 'ALL_UPSC') or (str_hotel_code == 'ALL_UPPER_UPSC'):
+            # Note: Insertion sequence matters! Processing from right-to-left so less complex (won't shift).
+            df.insert(len(df.loc[0, :]), column='revpar_rgi', value=np.nan)
+            df.insert(len(df.loc[0, :]), column='revpar_rank', value=np.nan)
+            df.insert(8, column='adr_ari', value=np.nan)
+            df.insert(9, column='adr_rank', value=np.nan)
+            df.insert(4, column='occ_mpi', value=np.nan)
+            df.insert(5, column='occ_rank', value=np.nan)
+
+        df.columns = ['occ', 'occ_comp', 'occ_chng_pct', 'occ_comp_chng_pct', 'occ_mpi', 'occ_rank',
+                      'adr', 'adr_comp', 'adr_chng_pct', 'adr_comp_chng_pct', 'adr_ari', 'adr_rank',
+                      'revpar', 'revpar_comp', 'revpar_chng_pct', 'revpar_comp_chng_pct', 'revpar_rgi', 'revpar_rank']
+        # Insert columns at the front of dataframe. These are key columns.
+        df.insert(loc=0, column='hotel_code', value=str_hotel_code)
+        df.insert(loc=1, column='period_name', value=str_period_name)
+        df.insert(loc=2, column='date_from', value=pd.to_datetime(str_dt_from))
+        df.insert(loc=3, column='date_to', value=pd.to_datetime(str_dt_to))
+        return df
+
+    def read_rpt_basic_perf_01_all(self, str_dt_from, str_dt_to, str_period_name, str_dir_src=None, str_dir_target=None):
+        """ Processes read_rpt_basic_perf_01() in a loop, to read multiple files.
+        Original downloaded files are ALWAYS DELETED thereafter, with an option to save a copy somewhere else.
+        Note: The str_dt_from and str_dt_to do not perform any form of filtering! They are just added as constants in their columns, to indicate which period the row is for.
+        :param str_dir_src: Directory where the files to be parsed are found.
+        :param str_dt_from:
+        :param str_dt_to:
+        :param str_period_name: Used to indicate what this period is (eg: "MTD", "YTD").
+        :param str_dir_target: If provided, will copy the downloaded files from STR to here, before deleting the originals.
+        :return: DataFrame containing all "Period" lines (10+1) for a specific period (str_period_name).
+        """
+        # By default, download directory is the 'Downloads' folder of the user.
+        if str_dir_src is None:
+            str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
+        else:
+            str_dl_folder = str_dir_src
+
+        l_str_fn_with_path = get_files(str_folder=str_dl_folder, pattern='xls$')  # Filenames can start with 'Cmp_Daily*" or "STR_OnlineReport*"
+
+        df_all = DataFrame()
+        for str_fn_with_path, _ in l_str_fn_with_path:
+            self.logger.info('READING FILE: ' + str_fn_with_path)
+            df = self.read_rpt_basic_perf_01(str_fn_with_path, str_dt_from, str_dt_to, str_period_name)
+            df_all = df_all.append(df)
+
+        # Downloaded files from STR will always be deleted. Copy files to str_dir_target if specified. eg: to C:/1/temp
+        # Deletion must always happen after use, because there could be another download from STR for a different period, immediately after this! (Note: this is unlikely to be thread-safe!)
+        if str_dir_target is not None:
+            for str_fn_with_path, str_fn in l_str_fn_with_path:
+                str_fn_target = os.path.join(str_dir_target, str_fn)
+                shutil.move(src=str_fn_with_path, dst=str_fn_target)  # move() also deletes the original.
+        else:
+            for str_fn_with_path, str_fn in l_str_fn_with_path:
+                os.remove(str_fn_with_path)
+
+        df_all['period_name'] = pd.Categorical(df_all['period_name'], categories=['YTD', 'P90D', 'MTD', 'P07D'])  # For custom sort order.
+        df_all.sort_values(by=['hotel_code', 'period_name'], inplace=True)
+        df_all.reset_index(drop=True, inplace=True)
+        return df_all
+
+    def get_str_perf_weekly(self):
+        """ Gets all STR Performance data ("Period" line) for all specified periods (eg: "MTD", "YTD", etc).
+        Works by download the XLS files for a period, reading into a df, then repeating for each period.
+        (We loop it this way because there's no way to tell the "period" simply by looking at the XLS files) -> "period" is a construct created by us!
+        Business Work Process: Run by Jamie every Thurday, on 10+1 hotels, for 4 periods.
+        DataFrame containing all "Period" lines (10+1) for ALL specified periods (str_period_name).
+        """
+        self.logger.info('[get_str_perf_weekly] STARTING RUN')
+
+        di_periods = get_date_ranges(l_periods=['MTD', 'YTD', 'P07D', 'P90D'])  # str_dt_ref defaults to current date.
+
+        df_all = DataFrame()
+
+        # For each period, download the 10 + 1 (hotels + ALL) XLS files.
+        for str_period_name, v in di_periods.items():
+            self.logger.info('Processing for period type: {} {}'.format(str_period_name, v))
+
+            # DOWNLOAD FILES FOR PERIOD #
+            self.download_rpt_basic_perf_01(str_dt_from=v[0], str_dt_to=v[1])   # Individual Hotels
+            self.download_rpt_basic_perf_01a(str_dt_from=v[0], str_dt_to=v[1])  # "ALL"
+            self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upscale')
+            self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upper_upscale')
+
+            # READ FILES #
+            df = self.read_rpt_basic_perf_01_all(str_dt_from=v[0], str_dt_to=v[1], str_period_name=str_period_name,
+                                                 str_dir_src=None, str_dir_target='C:/Users/feh_admin/Downloads/temp')
+            df_all = df_all.append(df)
+
+        # Sort again, because we appended period-by-period, so it's not in our desired sort order!
+        df_all.sort_values(by=['hotel_code', 'period_name'], inplace=True)
+        df_all.reset_index(drop=True, inplace=True)
+        return df_all
 
 
 class OperaEmailQualityMonitorReportBot(ReportBot):
