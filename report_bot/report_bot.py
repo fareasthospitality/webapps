@@ -194,7 +194,7 @@ class STRReportBot(ReportBot):
         super().__del__()
 
     @dec_err_handler(retries=0)
-    def send_str_perf_weekly(self):
+    def send_str_perf_weekly(self, str_listname='str_perf_rpt_weekly'):
         """ Downloads STR data, and emails it to the specified mailing list.
         NOTE: This same code has been copied over to the ReportBot application, and it is THAT copy which is running every week!
         There was some problem with circular imports (AdminReportBot is imported by feh.datareader <- feh.utils, so we cannot import feh.datareader from STRReportBot!)
@@ -205,7 +205,7 @@ class STRReportBot(ReportBot):
         Next the read_rpt_basic_perf_01() and read_rpt_basic_perf_01_all() are used to read the files in a df.
         The df is appended, for all period_name.
         """
-        str_listname = 'str_perf_rpt_weekly'  # Mailing listname
+
         str_subject = 'STR Weekly Report - Raw Data'
         str_msg = """
         <strong>Hello team!</strong>
@@ -277,26 +277,26 @@ class STRReportBot(ReportBot):
 
     def download_rpt_basic_perf_01(self, str_dt_from, str_dt_to):
         """ Downloads the STR STAR basic report by Property, for specified date range.
+        Note: OSKL is requested to be included in the individual properties, but NOT in the "ALL".
         """
         from selenium import webdriver
         from selenium.common.exceptions import NoSuchElementException
 
         # GET LIST OF HOTELS #
-        # 10 hotels (excl VHS, OSKL).
+        # 11 hotels (excl VHS).
         str_sql = """
         SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
         WHERE operator = 'feh'
         AND asset_type = 'hotel'
-        AND country = 'SG'  -- Excl 'OSKL'
         AND str_hotel_id IS NOT NULL
         AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
         ORDER BY str_hotel_name
         """
         df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
 
-        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads. Also see http://chromedriver.chromium.org/downloads/version-selection
         # LOGIN #
-        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], self.config['chromedriver']['exe_name'])
         driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
         driver.get('https://clients.str.com/ReportsOnline.aspx')
         input_email = driver.find_element_by_xpath('//*[@id="username"]')
@@ -332,13 +332,20 @@ class STRReportBot(ReportBot):
             # SUBMIT #
             driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
 
+            time.sleep(4)  # Wait for report to be downloaded before closing window below!
             # Switches back to the original browser tab (Note: For some reason, this will leave the new tabs opened until browser is closed)
+            for wn in driver.window_handles:
+                if wn_handle != wn:
+                    # Close all windows other than the original one.
+                    # Switch to the window, then close it. Then later switch back to original window.
+                    driver.switch_to.window(wn)
+                    driver.close()
             driver.switch_to.window(wn_handle)
 
         # LOGOUT #
-        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
-        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
-        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        # driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        # driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        time.sleep(3)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
         driver.quit()  # Quit the browser
 
     def download_rpt_basic_perf_01a(self, str_dt_from, str_dt_to):
@@ -365,7 +372,7 @@ class STRReportBot(ReportBot):
 
         # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
         # LOGIN #
-        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], self.config['chromedriver']['exe_name'])
         driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
         driver.get('https://clients.str.com/ReportsOnline.aspx')
         input_email = driver.find_element_by_xpath('//*[@id="username"]')
@@ -407,8 +414,8 @@ class STRReportBot(ReportBot):
         driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
 
         # LOGOUT #
-        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
-        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        # driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        # driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
         time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
         driver.quit()  # Quit the browser
 
@@ -436,7 +443,7 @@ class STRReportBot(ReportBot):
 
         # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
         # LOGIN #
-        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], self.config['chromedriver']['exe_name'])
         driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
         driver.get('https://clients.str.com/ReportsOnline.aspx')
         input_email = driver.find_element_by_xpath('//*[@id="username"]')
@@ -483,8 +490,8 @@ class STRReportBot(ReportBot):
         driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
 
         # LOGOUT #
-        driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
-        driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
+        # driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
+        # driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
         time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
         driver.quit()  # Quit the browser
 
@@ -619,9 +626,19 @@ class STRReportBot(ReportBot):
 
             # DOWNLOAD FILES FOR PERIOD #
             self.download_rpt_basic_perf_01(str_dt_from=v[0], str_dt_to=v[1])   # Individual Hotels
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01')
+            time.sleep(3)  # Add delay between each call. Fight against ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)
+
             self.download_rpt_basic_perf_01a(str_dt_from=v[0], str_dt_to=v[1])  # "ALL"
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01a')
+            time.sleep(2)
+
             self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upscale')
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upscale')
+            time.sleep(2)
+
             self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upper_upscale')
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upper_upscale')
 
             # READ FILES #
             df = self.read_rpt_basic_perf_01_all(str_dt_from=v[0], str_dt_to=v[1], str_period_name=str_period_name,
