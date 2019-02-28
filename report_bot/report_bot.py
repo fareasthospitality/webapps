@@ -206,6 +206,8 @@ class STRReportBot(ReportBot):
         The df is appended, for all period_name.
         """
 
+        #str_listname = 'test_aa'  # DEBUG
+
         str_subject = 'STR Weekly Report - Raw Data'
         str_msg = """
         <strong>Hello team!</strong>
@@ -243,9 +245,6 @@ class STRReportBot(ReportBot):
         str_fp_out = 'C:/fehdw/temp/' + str_fn_out
         df_str.to_excel(str_fp_out, index=False)
 
-        # # DEBUG
-        # str_fp_out = 'C:/1/STR_Perf_Weekly_2.xlsx'  # temp test Excel file
-
         # SEND EMAIL #
         MAIL_SERVER = self.config['smtp']['mail_server']
         SENDER = self.config['smtp']['from_name'] + ' <' + self.config['smtp']['from_email'] + '>'
@@ -278,6 +277,7 @@ class STRReportBot(ReportBot):
     def download_rpt_basic_perf_01(self, str_dt_from, str_dt_to):
         """ Downloads the STR STAR basic report by Property, for specified date range.
         Note: OSKL is requested to be included in the individual properties, but NOT in the "ALL".
+        Note 2: Total should be (11+3)x4 -> 64.
         """
         from selenium import webdriver
         from selenium.common.exceptions import NoSuchElementException
@@ -332,7 +332,9 @@ class STRReportBot(ReportBot):
             # SUBMIT #
             driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btnSubmit2"]').click()
 
-            time.sleep(4)  # Wait for report to be downloaded before closing window below!
+            # If wait time is too short, XLS file may not have finished downloading! Wait for report to be downloaded before closing window below!
+            # 4s seems too short; 10s seems okay.
+            time.sleep(10)
             # Switches back to the original browser tab (Note: For some reason, this will leave the new tabs opened until browser is closed)
             for wn in driver.window_handles:
                 if wn_handle != wn:
@@ -416,7 +418,7 @@ class STRReportBot(ReportBot):
         # LOGOUT #
         # driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
         # driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
-        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        time.sleep(10)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
         driver.quit()  # Quit the browser
 
     def download_rpt_basic_perf_01b(self, str_dt_from, str_dt_to, str_ind_seg):
@@ -616,7 +618,7 @@ class STRReportBot(ReportBot):
         """
         self.logger.info('[get_str_perf_weekly] STARTING RUN')
 
-        di_periods = get_date_ranges(l_periods=['MTD', 'YTD', 'P07D', 'P90D'])  # str_dt_ref defaults to current date.
+        di_periods = get_date_ranges(l_periods=['P07D', 'MTD', 'P90D', 'YTD'])  # str_dt_ref defaults to current date.
 
         df_all = DataFrame()
 
