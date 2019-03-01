@@ -65,11 +65,17 @@ try:
                 rb.get(str_dt_from=str_dt_from, str_dt_to=str_dt_to)
                 rb.send(str_listname='op_email_quality_monitor_weekly', str_subject=str_subject)
 
-    # str_perf_rpt_weekly # STR report.
+    # str_perf_rpt # STR report. Weekly
     if dt.time(13, 0) <= TIME_NOW < dt.time(13, 30):  # Specified to run at 1pm.
         if dt.datetime.today().weekday() == 3:  # Thursday
             str_rb = STRReportBot()
-            str_rb.send_str_perf_weekly()
+            str_rb.send_str_perf(str_type='Weekly')
+
+    # str_perf_rpt # STR report. Monthly.
+    if dt.time(13, 0) <= TIME_NOW < dt.time(13, 30):  # Specified to run at 1pm.
+        if dt.datetime.today().day == 1:  # First day of month
+            str_rb = STRReportBot()
+            str_rb.send_str_perf(str_type='Monthly')
 
 except Exception as ex:
     logger.error(ex)

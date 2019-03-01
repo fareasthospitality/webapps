@@ -194,7 +194,7 @@ class STRReportBot(ReportBot):
         super().__del__()
 
     @dec_err_handler(retries=0)
-    def send_str_perf_weekly(self, str_listname='str_perf_rpt_weekly'):
+    def send_str_perf(self, str_listname='str_perf_rpt_weekly', str_type='Weekly'):
         """ Downloads STR data, and emails it to the specified mailing list.
         NOTE: This same code has been copied over to the ReportBot application, and it is THAT copy which is running every week!
         There was some problem with circular imports (AdminReportBot is imported by feh.datareader <- feh.utils, so we cannot import feh.datareader from STRReportBot!)
@@ -206,13 +206,13 @@ class STRReportBot(ReportBot):
         The df is appended, for all period_name.
         """
 
-        #str_listname = 'test_aa'  # DEBUG
+        str_listname = 'test_aa'  # DEBUG
 
-        str_subject = 'STR Weekly Report - Raw Data'
+        str_subject = 'STR {} Report - Raw Data'.format(str_type)  # 'Weekly'/'Monthly'
         str_msg = """
         <strong>Hello team!</strong>
         <br>
-        I've finished copying-and-pasting the data from STR, as attached, for your weekly reporting activity.
+        I've finished copying-and-pasting the data from STR, as attached, for your reporting activity.
         I've also included the execution time of the report in the filename, for your convenience.
         <br><br>
         Best regards,
@@ -240,8 +240,12 @@ class STRReportBot(ReportBot):
         l_email_recipients = df['email'].tolist()
 
         # GET DATAFRAME AND OUTPUT TO XLSX FILE #
-        df_str = self.get_str_perf_weekly()
-        str_fn_out = 'STR_Weekly_Report' + get_curr_time_as_string() + '.xlsx'
+        if str_type == 'Weekly':
+            df_str = self.get_str_perf_weekly()
+        elif str_type == 'Monthly':
+            df_str = self.get_str_perf_monthly()
+
+        str_fn_out = 'STR_{}_Report'.format(str_type) + get_curr_time_as_string() + '.xlsx'
         str_fp_out = 'C:/fehdw/temp/' + str_fn_out
         df_str.to_excel(str_fp_out, index=False)
 
@@ -494,7 +498,7 @@ class STRReportBot(ReportBot):
         # LOGOUT #
         # driver.find_element_by_xpath('//*[@id="str-universal"]/a/i').click()  # Click the square icon.
         # driver.find_element_by_xpath('//*[@id="um-logout"]/div/strong').click()
-        time.sleep(5)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
+        time.sleep(12)  # Wait a bit, in case the last download has not completed! Symptom is if the last download does not seem to be there.
         driver.quit()  # Quit the browser
 
     def read_rpt_basic_perf_01(self, str_fn, str_dt_from, str_dt_to, str_period_name):
@@ -652,6 +656,50 @@ class STRReportBot(ReportBot):
         df_all.reset_index(drop=True, inplace=True)
         return df_all
 
+    def get_str_perf_monthly(self):
+        """ Gets all STR Performance data ("Period" line) for all specified periods (eg: "MTD", "YTD", etc).
+        Identical to get_str_perf_weekly(), except we give a str_dt_ref of START OF CURRENT MONTH.
+
+        Business Work Process: Run by Jamie on the first week of each month, on 10+1 hotels, for 4 periods.
+        DataFrame containing all "Period" lines (10+1) for ALL specified periods (str_period_name).
+        """
+        self.logger.info('[get_str_perf_monthly] STARTING RUN')
+
+        # Reference date to be set as the 1st day of the current month.
+        str_dt_ref = dt.datetime.today().date().replace(day=1).strftime(format='%Y-%m-%d')
+        di_periods = get_date_ranges(str_dt_ref=str_dt_ref, l_periods=['P07D', 'MTD', 'P90D', 'YTD'])  # str_dt_ref defaults to current date.
+
+        df_all = DataFrame()
+
+        # For each period, download the 10 + 1 (hotels + ALL) XLS files.
+        for str_period_name, v in di_periods.items():
+            self.logger.info('Processing for period type: {} {}'.format(str_period_name, v))
+
+            # DOWNLOAD FILES FOR PERIOD #
+            self.download_rpt_basic_perf_01(str_dt_from=v[0], str_dt_to=v[1])   # Individual Hotels
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01')
+            time.sleep(3)  # Add delay between each call. Fight against ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)
+
+            self.download_rpt_basic_perf_01a(str_dt_from=v[0], str_dt_to=v[1])  # "ALL"
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01a')
+            time.sleep(2)
+
+            self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upscale')
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upscale')
+            time.sleep(2)
+
+            self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upper_upscale')
+            self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upper_upscale')
+
+            # READ FILES #
+            df = self.read_rpt_basic_perf_01_all(str_dt_from=v[0], str_dt_to=v[1], str_period_name=str_period_name,
+                                                 str_dir_src=None, str_dir_target='C:/Users/feh_admin/Downloads/temp')
+            df_all = df_all.append(df)
+
+        # Sort again, because we appended period-by-period, so it's not in our desired sort order!
+        df_all.sort_values(by=['hotel_code', 'period_name'], inplace=True)
+        df_all.reset_index(drop=True, inplace=True)
+        return df_all
 
 class OperaEmailQualityMonitorReportBot(ReportBot):
     # Get labels for Opera columns.

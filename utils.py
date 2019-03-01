@@ -6,6 +6,7 @@ import time
 import logging
 import pandas as pd
 from pandas import DataFrame, Series
+from dateutil.relativedelta import relativedelta
 
 
 def dec_err_handler(retries=0):
@@ -58,12 +59,18 @@ def get_date_ranges(str_dt_ref=None, l_periods=[]):
 
     # CALCULATE PERIODS #
     di_periods = {}
-    str_dt_to = (dt_ref + pd.Timedelta(days=-1)).strftime('%Y-%m-%d')
+    dt_to = dt_ref + pd.Timedelta(days=-1)
+    str_dt_to = dt_to.strftime('%Y-%m-%d')
 
     for period in l_periods:
         if period == 'MTD':
-            str_dt_from = dt_ref.replace(day=1).strftime('%Y-%m-%d')
+            dt_from = dt_ref.replace(day=1)
+            # "Monthly" case. Where today() is in a later month, but we want data for the preceding month (and not current month).
+            if dt_from > dt_to:
+                dt_from = dt_from + relativedelta(months=-1)
+            str_dt_from = dt_from.strftime('%Y-%m-%d')
             di_periods[period] = (str_dt_from, str_dt_to)  # from first date of month
+
         elif period == 'YTD':
             str_dt_from = dt_ref.replace(day=1, month=1).strftime('%Y-%m-%d')
             di_periods[period] = (str_dt_from, str_dt_to)  # from first date of year
