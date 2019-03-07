@@ -133,7 +133,7 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
 def get_curr_time_as_string(format='%Y%m%d_%H%M', dt_date=None, leading_underscore=True):
     """ Returns current timestamp as a string.
     Convenience function. Timestamps are frequently used in filenames, to make them unique.
-    Default format is eg: 'YYYYMMDD_hhmm'
+    Default output format is: '_YYYYMMDD_hhmm'
 
     :param format: Use this format if specified.
     :param dt: Converts this date object if specified, otherwise uses current timestamp.

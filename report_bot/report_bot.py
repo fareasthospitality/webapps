@@ -651,6 +651,10 @@ class STRReportBot(ReportBot):
                                                  str_dir_src=None, str_dir_target='C:/Users/feh_admin/Downloads/temp')
             df_all = df_all.append(df)
 
+            # Interim output of df_all. So that if fails mid-way, the costly processing is not wasted. Can just read the CSV and continue.
+            str_temp_fn = 'C:/Users/feh_admin/Downloads/temp/df_all' + get_curr_time_as_string() + '.csv'
+            df_all.to_csv(str_temp_fn, index=False)
+
         # Sort again, because we appended period-by-period, so it's not in our desired sort order!
         df_all.sort_values(by=['hotel_code', 'period_name'], inplace=True)
         df_all.reset_index(drop=True, inplace=True)
@@ -700,6 +704,7 @@ class STRReportBot(ReportBot):
         df_all.sort_values(by=['hotel_code', 'period_name'], inplace=True)
         df_all.reset_index(drop=True, inplace=True)
         return df_all
+
 
 class OperaEmailQualityMonitorReportBot(ReportBot):
     # Get labels for Opera columns.
