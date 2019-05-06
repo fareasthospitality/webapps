@@ -193,7 +193,7 @@ class STRReportBot(ReportBot):
     def __del__(self):
         super().__del__()
 
-    @dec_err_handler(retries=0)
+    @dec_err_handler(retries=3)
     def send_str_perf(self, str_listname='str_perf_rpt_weekly', str_type='Weekly'):
         """ Downloads STR data, and emails it to the specified mailing list.
         NOTE: This same code has been copied over to the ReportBot application, and it is THAT copy which is running every week!
@@ -206,7 +206,13 @@ class STRReportBot(ReportBot):
         The df is appended, for all period_name.
         """
 
-        str_listname = 'test_aa'  # DEBUG
+        #str_listname = 'test_aa'  # DEBUG
+
+        # ALWAYS CLEAR DOWNLOAD FOLDER OF XLS FILES BEFORE STARTING, TO ALLOW A CLEAN RETRY AFTER EXCEPTION.
+        str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
+        l_str_fn_with_path = get_files(str_folder=str_dl_folder, pattern='xls$')
+        for fp, _ in l_str_fn_with_path:
+            os.remove(fp)
 
         str_subject = 'STR {} Report - Raw Data'.format(str_type)  # 'Weekly'/'Monthly'
         str_msg = """
@@ -272,7 +278,7 @@ class STRReportBot(ReportBot):
         s.sendmail(SENDER, l_email_recipients, msg.as_string())
         s.quit()
 
-        # os.remove(self.str_email_attach_fn)  # Delete the Excel file.
+        # os.remove(self.str_fp_out)  # Delete the Excel file.
 
         # Write to log file #
         # Note: All sent emails will be logged. This includes emails which were sent by other applications, which leverage upon ReportBot's functionalities!
@@ -598,7 +604,7 @@ class STRReportBot(ReportBot):
             df = self.read_rpt_basic_perf_01(str_fn_with_path, str_dt_from, str_dt_to, str_period_name)
             df_all = df_all.append(df)
 
-        # Downloaded files from STR will always be deleted. Copy files to str_dir_target if specified. eg: to C:/1/temp
+        # Downloaded files from STR will always be deleted. Copy files to str_dir_target if specified. eg: to 'C:/Users/feh_admin/Downloads/temp'
         # Deletion must always happen after use, because there could be another download from STR for a different period, immediately after this! (Note: this is unlikely to be thread-safe!)
         if str_dir_target is not None:
             for str_fn_with_path, str_fn in l_str_fn_with_path:
@@ -623,7 +629,6 @@ class STRReportBot(ReportBot):
         self.logger.info('[get_str_perf_weekly] STARTING RUN')
 
         di_periods = get_date_ranges(l_periods=['P07D', 'MTD', 'P90D', 'YTD'])  # str_dt_ref defaults to current date.
-
         df_all = DataFrame()
 
         # For each period, download the 10 + 1 (hotels + ALL) XLS files.
@@ -637,14 +642,15 @@ class STRReportBot(ReportBot):
 
             self.download_rpt_basic_perf_01a(str_dt_from=v[0], str_dt_to=v[1])  # "ALL"
             self.logger.info('COMPLETED: download_rpt_basic_perf_01a')
-            time.sleep(2)
+            time.sleep(3)
 
             self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upscale')
             self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upscale')
-            time.sleep(2)
+            time.sleep(3)
 
             self.download_rpt_basic_perf_01b(str_dt_from=v[0], str_dt_to=v[1], str_ind_seg='upper_upscale')
             self.logger.info('COMPLETED: download_rpt_basic_perf_01b - upper_upscale')
+            time.sleep(3)
 
             # READ FILES #
             df = self.read_rpt_basic_perf_01_all(str_dt_from=v[0], str_dt_to=v[1], str_period_name=str_period_name,
