@@ -294,12 +294,13 @@ class STRReportBot(ReportBot):
 
         # GET LIST OF HOTELS #
         # 11 hotels (excl VHS).
+        # 17 May 2019: ML asked that VHS to be included, so commented out in the SQL. This covers TOH as well, because same compset as VHS.
         str_sql = """
         SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
         WHERE operator = 'feh'
         AND asset_type = 'hotel'
         AND str_hotel_id IS NOT NULL
-        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        -- AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
         ORDER BY str_hotel_name
         """
         df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
@@ -371,13 +372,14 @@ class STRReportBot(ReportBot):
 
         # GET LIST OF HOTELS #
         # 10 hotels (excl VHS, OSKL).
+        # 17 May 2019: ML asked that VHS to be included, so commented out in the SQL. This covers TOH as well, because same compset as VHS.
         str_sql = """
         SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
         WHERE operator = 'feh'
         AND asset_type = 'hotel'
         AND country = 'SG'  -- Excl 'OSKL'
         AND str_hotel_id IS NOT NULL
-        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        -- AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
         ORDER BY str_hotel_name
         """
         df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
@@ -442,13 +444,14 @@ class STRReportBot(ReportBot):
 
         # GET LIST OF HOTELS #
         # 10 hotels (excl VHS, OSKL).
+        # 17 May 2019: ML asked that VHS to be included, so commented out in the SQL. This covers TOH as well, because same compset as VHS.
         str_sql = """
         SELECT str_hotel_id, str_hotel_name FROM cfg_map_properties
         WHERE operator = 'feh'
         AND asset_type = 'hotel'
         AND country = 'SG'  -- Excl 'OSKL'
         AND str_hotel_id IS NOT NULL
-        AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
+        -- AND cluster <> 'Sentosa'  -- Excl Sentosa hotels.
         ORDER BY str_hotel_name
         """
         df_hotels = pd.read_sql(str_sql, self.db_fehdw_conn)
