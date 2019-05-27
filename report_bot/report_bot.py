@@ -206,7 +206,8 @@ class STRReportBot(ReportBot):
         The df is appended, for all period_name.
         """
 
-        #str_listname = 'test_aa'  # DEBUG
+        # str_listname = 'test_aa'  # DEBUG
+        # print(str_listname)
 
         # ALWAYS CLEAR DOWNLOAD FOLDER OF XLS FILES BEFORE STARTING, TO ALLOW A CLEAN RETRY AFTER EXCEPTION.
         str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
@@ -530,7 +531,7 @@ class STRReportBot(ReportBot):
             # "str_hotel_id" -> means STR Hotel ID, not "string"!
             str_hotel_id = re.search('(?<=#)\d+', str_hotel_name_row)[0]  # eg: 'The Elizabeth Hotel #123456'
 
-            # GET HOTEL CODE FROM PROPERTY NAME #
+            # GET HOTEL CODE FROM STR ID, USING MAPPING TABLE #
             str_sql = """
             SELECT hotel_code FROM cfg_map_properties
             WHERE str_hotel_id = '{}'
@@ -556,6 +557,16 @@ class STRReportBot(ReportBot):
         df.drop(['Date'], axis=1, inplace=True)
         df.reset_index(drop=True, inplace=True)
 
+        # The file for "VHS" hotel has 3 less columns (15 instead of 18) because the 3 "My Prop % Chng" columns are not there. To insert NaNs into the correct positions.
+        # Note: Can remove this section once those 3 columns eventually come back.
+        if str_hotel_code == 'VHS':
+            if str_period_name == 'YTD':  # Only 5 out of 18 columns populated. Will not return anything for VHS for YTD.
+                return None
+            else:
+                df.insert(2, column='occ_chng_pct', value=np.nan)
+                df.insert(8, column='adr_chng_pct', value=np.nan)
+                df.insert(14, column='revpar_chng_pct', value=np.nan)
+
         # The file for "ALL" hotels has 3 less columns (15 instead of 18) because the 3 "rank" columns are not there. To insert NaNs into the correct positions.
         if str_hotel_code == 'ALL':
             df.insert(5, column='occ_rank', value=np.nan)
@@ -575,7 +586,8 @@ class STRReportBot(ReportBot):
         df.columns = ['occ', 'occ_comp', 'occ_chng_pct', 'occ_comp_chng_pct', 'occ_mpi', 'occ_rank',
                       'adr', 'adr_comp', 'adr_chng_pct', 'adr_comp_chng_pct', 'adr_ari', 'adr_rank',
                       'revpar', 'revpar_comp', 'revpar_chng_pct', 'revpar_comp_chng_pct', 'revpar_rgi', 'revpar_rank']
-        # Insert columns at the front of dataframe. These are key columns.
+
+        # Insert additional columns at the front of dataframe. These are key columns.
         df.insert(loc=0, column='hotel_code', value=str_hotel_code)
         df.insert(loc=1, column='period_name', value=str_period_name)
         df.insert(loc=2, column='date_from', value=pd.to_datetime(str_dt_from))
